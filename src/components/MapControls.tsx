@@ -4,6 +4,7 @@ import { getCameraLocationsUrl } from '../api/cameraLocations';
 export interface MapOptions {
   showSuburbs: boolean;
   uniqueSuburbs: boolean;
+  fitAllLocations: boolean;
 }
 
 interface MapControlsProps {
@@ -56,6 +57,14 @@ export function MapControls({ options, onChange, dateStr, onClose, onResetPositi
             onChange={(e) => onChange({ ...options, uniqueSuburbs: e.target.checked })}
           />
           <span>Unique suburbs only</span>
+        </label>
+        <label className="map-controls-checkbox">
+          <input
+            type="checkbox"
+            checked={options.fitAllLocations}
+            onChange={(e) => onChange({ ...options, fitAllLocations: e.target.checked })}
+          />
+          <span>Fit all locations</span>
         </label>
       </div>
       <button

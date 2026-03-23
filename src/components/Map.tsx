@@ -117,7 +117,10 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: 
   }
 }
 
-const DEFAULT_OPTIONS: MapOptions = { showSuburbs: true, uniqueSuburbs: true };
+const DEFAULT_OPTIONS: MapOptions = { showSuburbs: true, uniqueSuburbs: true, fitAllLocations: true };
+
+const DEFAULT_CENTER: [number, number] = [138.6, -34.9];
+const DEFAULT_ZOOM = 10;
 
 function fitMapToData(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions) {
   const countryStreets = locationsToStreetFeatures(data.locations?.country ?? []);
@@ -153,6 +156,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   const mapRef = useRef<maplibregl.Map | null>(null);
   const dataRef = useRef<ApiCameraLocations | null>(null);
   const optionsRef = useRef<MapOptions>(options);
+  const hasPerformedInitialFitRef = useRef(false);
   dataRef.current = data;
   optionsRef.current = options;
 
@@ -167,8 +171,8 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: `https://api.maptiler.com/maps/streets-v4/style.json?key=${key}`,
-      center: [138.6, -34.9],
-      zoom: 10,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
     });
 
     mapRef.current = map;
@@ -215,7 +219,9 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       });
 
       if (dataRef.current) {
-        applyDataToMap(map, dataRef.current, optionsRef.current, false);
+        const shouldFit = optionsRef.current.fitAllLocations;
+        applyDataToMap(map, dataRef.current, optionsRef.current, shouldFit);
+        if (shouldFit) hasPerformedInitialFitRef.current = true;
       }
     });
 
@@ -239,7 +245,10 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       const currentData = dataRef.current;
       const currentOptions = optionsRef.current;
       if (currentData) {
-        applyDataToMap(map, currentData, currentOptions, false);
+        const shouldFit =
+          currentOptions.fitAllLocations && !hasPerformedInitialFitRef.current;
+        applyDataToMap(map, currentData, currentOptions, shouldFit);
+        if (shouldFit) hasPerformedInitialFitRef.current = true;
       } else {
         map.setLayoutProperty('country-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
         map.setLayoutProperty('metro-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
@@ -259,11 +268,19 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || resetPositionTrigger <= 0 || !data) return;
+    if (!map || resetPositionTrigger <= 0) return;
+    const currentOptions = optionsRef.current;
+    const runReset = () => {
+      if (currentOptions.fitAllLocations && data) {
+        fitMapToData(map, data, currentOptions);
+      } else {
+        map.flyTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
+      }
+    };
     if (!map.isStyleLoaded()) {
-      map.once('load', () => fitMapToData(map, data, optionsRef.current));
+      map.once('load', runReset);
     } else {
-      fitMapToData(map, data, options);
+      runReset();
     }
   }, [resetPositionTrigger, data, options]);
 
