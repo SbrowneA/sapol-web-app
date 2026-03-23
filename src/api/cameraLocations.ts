@@ -27,3 +27,12 @@ export async function fetchCameraLocations(params: {
 
   return res.json();
 }
+
+export function getCameraLocationsUrl(params: { date?: string; start_date?: string; end_date?: string }): string {
+  const base = import.meta.env.VITE_API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  const searchParams = new URLSearchParams();
+  if (params.date) searchParams.set('date', params.date);
+  if (params.start_date) searchParams.set('start_date', params.start_date);
+  if (params.end_date) searchParams.set('end_date', params.end_date);
+  return `${base}/api/camera-locations?${searchParams.toString()}`;
+}

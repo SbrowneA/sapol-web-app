@@ -1,8 +1,11 @@
 type ApiCameraLocation = {
   cameraLocationId: number;
-  suburbName: string;
+  resolvedLocationId: number;
   streetName: string;
+  suburbName: string;
   suburbId: number;
+  startDate: string;
+  endDate: string;
   streetGeom: GeoJSON.Geometry;
   suburbGeom: GeoJSON.Geometry;
 };

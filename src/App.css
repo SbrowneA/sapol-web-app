@@ -212,7 +212,7 @@
   background: var(--accent-border);
 }
 
-.debug-toggle {
+.map-options-toggle {
   font-size: 12px;
   padding: 0.3rem 0.6rem;
   border: 1px solid var(--border);
@@ -222,28 +222,25 @@
   cursor: pointer;
 }
 
-.debug-toggle:hover {
+.map-options-toggle:hover {
   background: var(--border);
 }
 
-.debug-popup {
+.map-controls-popup {
   position: absolute;
   top: 100%;
   right: 0;
   margin-top: 0.5rem;
   padding: 1rem;
-  min-width: 280px;
-  max-width: 90vw;
-  max-height: 60vh;
-  overflow: auto;
-  background: var(--code-bg);
+  min-width: 240px;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow);
   z-index: 100;
 }
 
-.debug-close {
+.map-controls-close {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
@@ -258,17 +255,66 @@
   cursor: pointer;
 }
 
-.debug-close:hover {
+.map-controls-close:hover {
   color: var(--text-h);
 }
 
-.debug-content {
-  margin: 0;
-  padding-right: 1.5rem;
-  font-size: 12px;
-  font-family: var(--mono);
-  white-space: pre-wrap;
-  word-break: break-all;
+.map-controls-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.map-controls-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.map-controls-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.map-controls-checkbox input {
+  width: 16px;
+  height: 16px;
+}
+
+.map-controls-reset-btn {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.map-controls-reset-btn:hover {
+  background: var(--border);
+}
+
+.map-controls-api {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.map-controls-api a {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.map-controls-api a:hover {
+  text-decoration: underline;
 }
 
 .app-error {

@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { ApiCameraLocations } from '../types/api';
 import type { Feature, FeatureCollection } from 'geojson';
+import type { MapOptions } from './MapControls';
 
 const SOURCE_IDS = {
   countryStreets: 'country-streets',
@@ -21,9 +22,27 @@ function locationsToStreetFeatures(locations: ApiCameraLocations['locations']['c
     }));
 }
 
-function locationsToSuburbFeatures(locations: ApiCameraLocations['locations']['country'] | ApiCameraLocations['locations']['metro']): Feature[] {
-  return locations
-    .filter((loc) => loc.suburbGeom && (loc.suburbGeom.type === 'Polygon' || loc.suburbGeom.type === 'MultiPolygon'))
+function locationsToSuburbFeatures(
+  locations: ApiCameraLocations['locations']['country'] | ApiCameraLocations['locations']['metro'],
+  uniqueSuburbs: boolean
+): Feature[] {
+  const filtered = locations.filter(
+    (loc) => loc.suburbGeom && (loc.suburbGeom.type === 'Polygon' || loc.suburbGeom.type === 'MultiPolygon')
+  );
+  if (!uniqueSuburbs) {
+    return filtered.map((loc) => ({
+      type: 'Feature' as const,
+      geometry: loc.suburbGeom,
+      properties: { cameraLocationId: loc.cameraLocationId, streetName: loc.streetName, suburbName: loc.suburbName },
+    }));
+  }
+  const seen = new Set<number>();
+  return filtered
+    .filter((loc) => {
+      if (seen.has(loc.suburbId)) return false;
+      seen.add(loc.suburbId);
+      return true;
+    })
     .map((loc) => ({
       type: 'Feature' as const,
       geometry: loc.suburbGeom,
@@ -38,13 +57,15 @@ function emptyFeatureCollection(): FeatureCollection {
 interface MapProps {
   data: ApiCameraLocations | null;
   loading?: boolean;
+  options?: MapOptions;
+  resetPositionTrigger?: number;
 }
 
-function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations) {
+function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions, fitBounds: boolean) {
   const countryStreets = locationsToStreetFeatures(data.locations?.country ?? []);
-  const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? []);
+  const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? [], options.uniqueSuburbs);
   const metroStreets = locationsToStreetFeatures(data.locations?.metro ?? []);
-  const metroSuburbs = locationsToSuburbFeatures(data.locations?.metro ?? []);
+  const metroSuburbs = locationsToSuburbFeatures(data.locations?.metro ?? [], options.uniqueSuburbs);
 
   const countryStreetsSource = map.getSource(SOURCE_IDS.countryStreets) as maplibregl.GeoJSONSource | undefined;
   if (!countryStreetsSource?.setData) return;
@@ -55,7 +76,7 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations) {
   });
   (map.getSource(SOURCE_IDS.countrySuburbs) as maplibregl.GeoJSONSource).setData({
     type: 'FeatureCollection',
-    features: countrySuburbs,
+    features: options.showSuburbs ? countrySuburbs : [],
   });
   (map.getSource(SOURCE_IDS.metroStreets) as maplibregl.GeoJSONSource).setData({
     type: 'FeatureCollection',
@@ -63,35 +84,77 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations) {
   });
   (map.getSource(SOURCE_IDS.metroSuburbs) as maplibregl.GeoJSONSource).setData({
     type: 'FeatureCollection',
-    features: metroSuburbs,
+    features: options.showSuburbs ? metroSuburbs : [],
   });
 
-  const allFeatures = [...countryStreets, ...countrySuburbs, ...metroStreets, ...metroSuburbs];
-  if (allFeatures.length > 0) {
-    const bounds = new maplibregl.LngLatBounds();
-    const addToBounds = (f: Feature) => {
-      if (f.geometry.type === 'Point') {
-        bounds.extend(f.geometry.coordinates as [number, number]);
-      } else if (f.geometry.type === 'LineString') {
-        f.geometry.coordinates.forEach((c) => bounds.extend(c as [number, number]));
-      } else if (f.geometry.type === 'Polygon') {
-        f.geometry.coordinates[0].forEach((c) => bounds.extend(c as [number, number]));
-      } else if (f.geometry.type === 'MultiLineString') {
-        f.geometry.coordinates.flat().forEach((c) => bounds.extend(c as [number, number]));
-      } else if (f.geometry.type === 'MultiPolygon') {
-        f.geometry.coordinates.flat(2).forEach((c) => bounds.extend(c as [number, number]));
-      }
-    };
-    allFeatures.forEach(addToBounds);
-    map.fitBounds(bounds, { padding: 40, maxZoom: 14 });
+  map.setLayoutProperty('country-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
+  map.setLayoutProperty('metro-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
+
+  if (fitBounds) {
+    const allFeatures = [
+      ...countryStreets,
+      ...metroStreets,
+      ...(options.showSuburbs ? [...countrySuburbs, ...metroSuburbs] : []),
+    ];
+    if (allFeatures.length > 0) {
+      const bounds = new maplibregl.LngLatBounds();
+      const addToBounds = (f: Feature) => {
+        if (f.geometry.type === 'Point') {
+          bounds.extend(f.geometry.coordinates as [number, number]);
+        } else if (f.geometry.type === 'LineString') {
+          f.geometry.coordinates.forEach((c) => bounds.extend(c as [number, number]));
+        } else if (f.geometry.type === 'Polygon') {
+          f.geometry.coordinates[0].forEach((c) => bounds.extend(c as [number, number]));
+        } else if (f.geometry.type === 'MultiLineString') {
+          f.geometry.coordinates.flat().forEach((c) => bounds.extend(c as [number, number]));
+        } else if (f.geometry.type === 'MultiPolygon') {
+          f.geometry.coordinates.flat(2).forEach((c) => bounds.extend(c as [number, number]));
+        }
+      };
+      allFeatures.forEach(addToBounds);
+      map.fitBounds(bounds, { padding: 40, maxZoom: 14 });
+    }
   }
 }
 
-export function Map({ data, loading }: MapProps) {
+const DEFAULT_OPTIONS: MapOptions = { showSuburbs: true, uniqueSuburbs: true };
+
+function fitMapToData(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions) {
+  const countryStreets = locationsToStreetFeatures(data.locations?.country ?? []);
+  const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? [], options.uniqueSuburbs);
+  const metroStreets = locationsToStreetFeatures(data.locations?.metro ?? []);
+  const metroSuburbs = locationsToSuburbFeatures(data.locations?.metro ?? [], options.uniqueSuburbs);
+  const allFeatures = [
+    ...countryStreets,
+    ...metroStreets,
+    ...(options.showSuburbs ? [...countrySuburbs, ...metroSuburbs] : []),
+  ];
+  if (allFeatures.length === 0) return;
+  const bounds = new maplibregl.LngLatBounds();
+  const addToBounds = (f: Feature) => {
+    if (f.geometry.type === 'Point') {
+      bounds.extend(f.geometry.coordinates as [number, number]);
+    } else if (f.geometry.type === 'LineString') {
+      f.geometry.coordinates.forEach((c) => bounds.extend(c as [number, number]));
+    } else if (f.geometry.type === 'Polygon') {
+      f.geometry.coordinates[0].forEach((c) => bounds.extend(c as [number, number]));
+    } else if (f.geometry.type === 'MultiLineString') {
+      f.geometry.coordinates.flat().forEach((c) => bounds.extend(c as [number, number]));
+    } else if (f.geometry.type === 'MultiPolygon') {
+      f.geometry.coordinates.flat(2).forEach((c) => bounds.extend(c as [number, number]));
+    }
+  };
+  allFeatures.forEach(addToBounds);
+  map.fitBounds(bounds, { padding: 40, maxZoom: 14 });
+}
+
+export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTrigger = 0 }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const dataRef = useRef<ApiCameraLocations | null>(null);
+  const optionsRef = useRef<MapOptions>(options);
   dataRef.current = data;
+  optionsRef.current = options;
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -152,7 +215,7 @@ export function Map({ data, loading }: MapProps) {
       });
 
       if (dataRef.current) {
-        applyDataToMap(map, dataRef.current);
+        applyDataToMap(map, dataRef.current, optionsRef.current, false);
       }
     });
 
@@ -165,14 +228,44 @@ export function Map({ data, loading }: MapProps) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !data) return;
-    try {
-      map.getSource(SOURCE_IDS.countryStreets);
-    } catch {
-      return;
+    if (!map) return;
+
+    const runUpdate = () => {
+      try {
+        map.getSource(SOURCE_IDS.countryStreets);
+      } catch {
+        return;
+      }
+      const currentData = dataRef.current;
+      const currentOptions = optionsRef.current;
+      if (currentData) {
+        applyDataToMap(map, currentData, currentOptions, false);
+      } else {
+        map.setLayoutProperty('country-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
+        map.setLayoutProperty('metro-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      runUpdate();
+    } else {
+      const onLoad = () => runUpdate();
+      map.once('load', onLoad);
+      return () => {
+        map.off('load', onLoad);
+      };
     }
-    applyDataToMap(map, data);
-  }, [data]);
+  }, [data, options]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || resetPositionTrigger <= 0 || !data) return;
+    if (!map.isStyleLoaded()) {
+      map.once('load', () => fitMapToData(map, data, optionsRef.current));
+    } else {
+      fitMapToData(map, data, options);
+    }
+  }, [resetPositionTrigger, data, options]);
 
   return (
     <div className="map-wrapper">

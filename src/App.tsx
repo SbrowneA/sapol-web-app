@@ -2,11 +2,16 @@ import { useState } from 'react';
 import { useCameraLocations } from './hooks/useCameraLocations';
 import { DatePicker } from './components/DatePicker';
 import { Map } from './components/Map';
+import { MapControls, type MapOptions } from './components/MapControls';
 import './App.css';
+
+const DEFAULT_MAP_OPTIONS: MapOptions = { showSuburbs: true, uniqueSuburbs: true };
 
 function App() {
   const { setDate, dateStr, data, loading, error } = useCameraLocations();
-  const [showDebug, setShowDebug] = useState(false);
+  const [showMapOptions, setShowMapOptions] = useState(false);
+  const [mapOptions, setMapOptions] = useState<MapOptions>(DEFAULT_MAP_OPTIONS);
+  const [resetPositionTrigger, setResetPositionTrigger] = useState(0);
 
   return (
     <div className="app">
@@ -15,32 +20,20 @@ function App() {
         <DatePicker value={dateStr} onChange={setDate} disabled={loading} />
         <button
           type="button"
-          className="debug-toggle"
-          onClick={() => setShowDebug((v) => !v)}
-          title="Toggle API debug"
+          className="map-options-toggle"
+          onClick={() => setShowMapOptions((v) => !v)}
+          title="Map display options"
         >
-          Debug
+          Options
         </button>
-        {showDebug && (
-          <div className="debug-popup" role="dialog" aria-label="API response debug">
-            <button
-              type="button"
-              className="debug-close"
-              onClick={() => setShowDebug(false)}
-              aria-label="Close debug"
-            >
-              ×
-            </button>
-            <pre className="debug-content">
-              {error
-                ? `Error: ${error.message}`
-                : data
-                  ? JSON.stringify(data, null, 2)
-                  : loading
-                    ? 'Loading…'
-                    : 'No data'}
-            </pre>
-          </div>
+        {showMapOptions && (
+          <MapControls
+            options={mapOptions}
+            onChange={setMapOptions}
+            dateStr={dateStr}
+            onClose={() => setShowMapOptions(false)}
+            onResetPosition={() => setResetPositionTrigger((t) => t + 1)}
+          />
         )}
       </header>
       {error && (
@@ -49,7 +42,7 @@ function App() {
         </div>
       )}
       <main className="app-main">
-        <Map data={data} loading={loading} />
+        <Map data={data} loading={loading} options={mapOptions} resetPositionTrigger={resetPositionTrigger} />
       </main>
     </div>
   );
