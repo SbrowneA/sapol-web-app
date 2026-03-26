@@ -5,7 +5,15 @@ import { Map } from './components/Map';
 import { MapControls, type MapOptions } from './components/MapControls';
 import './App.css';
 
-const DEFAULT_MAP_OPTIONS: MapOptions = { showSuburbs: true, uniqueSuburbs: true, fitAllLocations: true };
+const DEFAULT_MAP_OPTIONS: MapOptions = {
+  showSuburbs: true,
+  uniqueSuburbs: true,
+  fitAllLocations: false,
+  streetInteraction: 'click',
+  suburbInteraction: 'hover',
+  suburbHighlightOnInteraction: true,
+  suburbOutlineSuburbs: true,
+};
 
 function App() {
   const { setDate, dateStr, data, loading, error } = useCameraLocations();
