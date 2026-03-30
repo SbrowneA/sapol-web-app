@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
+
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { ApiCameraLocations } from '../types/api';
 import type { Feature, FeatureCollection } from 'geojson';
+
+import type { ApiCameraLocation, ApiCameraLocations } from '../types/api';
 import type { MapOptions } from './MapControls';
 
 const SOURCE_IDS = {
@@ -27,6 +29,9 @@ const STREET_LAYER_IDS = ['country-streets-line', 'metro-streets-line'] as const
 const SUBURB_LAYER_IDS = ['country-suburbs-fill', 'metro-suburbs-fill'] as const;
 const HOVER_LAYER_IDS = [...STREET_LAYER_IDS, ...SUBURB_LAYER_IDS] as const;
 
+const STREET_LAYER_ID_SET = new Set<string>(STREET_LAYER_IDS);
+const SUBURB_LAYER_ID_SET = new Set<string>(SUBURB_LAYER_IDS);
+
 const REGION_COLORS = { country: '#2563eb', metro: '#ea580c' } as const;
 
 function formatDateShort(iso: string): string {
@@ -48,10 +53,7 @@ type StreetFeatureProperties = {
   regionType: 'country' | 'metro';
 };
 
-function locationsToStreetFeatures(
-  locations: ApiCameraLocations['locations']['country'] | ApiCameraLocations['locations']['metro'],
-  regionType: 'country' | 'metro'
-): Feature[] {
+function locationsToStreetFeatures(locations: ApiCameraLocation[], regionType: 'country' | 'metro'): Feature[] {
   return locations
     .filter((loc) => loc.streetGeom && (loc.streetGeom.type === 'LineString' || loc.streetGeom.type === 'MultiLineString'))
     .map((loc) => ({
@@ -69,10 +71,7 @@ function locationsToStreetFeatures(
     }));
 }
 
-function locationsToSuburbFeatures(
-  locations: ApiCameraLocations['locations']['country'] | ApiCameraLocations['locations']['metro'],
-  uniqueSuburbs: boolean
-): Feature[] {
+function locationsToSuburbFeatures(locations: ApiCameraLocation[], uniqueSuburbs: boolean): Feature[] {
   const filtered = locations.filter(
     (loc) => loc.suburbGeom && (loc.suburbGeom.type === 'Polygon' || loc.suburbGeom.type === 'MultiPolygon')
   );
@@ -101,6 +100,11 @@ function locationsToSuburbFeatures(
 
 function emptyFeatureCollection(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
+}
+
+function getGeoJsonSource(map: maplibregl.Map, id: string): maplibregl.GeoJSONSource | undefined {
+  const source = map.getSource(id);
+  return source?.type === 'geojson' ? (source as maplibregl.GeoJSONSource) : undefined;
 }
 
 function buildPopupHTML(features: QueriedStreetFeature[]): string {
@@ -173,22 +177,22 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: 
   const metroStreets = locationsToStreetFeatures(data.locations?.metro ?? [], 'metro');
   const metroSuburbs = locationsToSuburbFeatures(data.locations?.metro ?? [], options.uniqueSuburbs);
 
-  const countryStreetsSource = map.getSource(SOURCE_IDS.countryStreets) as maplibregl.GeoJSONSource | undefined;
-  if (!countryStreetsSource?.setData) return;
+  const countryStreetsSource = getGeoJsonSource(map, SOURCE_IDS.countryStreets);
+  if (!countryStreetsSource) return;
 
   countryStreetsSource.setData({
     type: 'FeatureCollection',
     features: countryStreets,
   });
-  (map.getSource(SOURCE_IDS.countrySuburbs) as maplibregl.GeoJSONSource).setData({
+  getGeoJsonSource(map, SOURCE_IDS.countrySuburbs)?.setData({
     type: 'FeatureCollection',
     features: options.showSuburbs ? countrySuburbs : [],
   });
-  (map.getSource(SOURCE_IDS.metroStreets) as maplibregl.GeoJSONSource).setData({
+  getGeoJsonSource(map, SOURCE_IDS.metroStreets)?.setData({
     type: 'FeatureCollection',
     features: metroStreets,
   });
-  (map.getSource(SOURCE_IDS.metroSuburbs) as maplibregl.GeoJSONSource).setData({
+  getGeoJsonSource(map, SOURCE_IDS.metroSuburbs)?.setData({
     type: 'FeatureCollection',
     features: options.showSuburbs ? metroSuburbs : [],
   });
@@ -272,20 +276,23 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   const dataRef = useRef<ApiCameraLocations | null>(null);
   const optionsRef = useRef<MapOptions>(options);
   const hasPerformedInitialFitRef = useRef(false);
-  dataRef.current = data;
-  optionsRef.current = options;
+
+  useEffect(() => {
+    dataRef.current = data;
+    optionsRef.current = options;
+  }, [data, options]);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    const key = import.meta.env.VITE_MAPTILER_KEY;
+    const key: string | undefined = import.meta.env.VITE_MAPTILER_KEY;
     if (!key) {
       console.warn('VITE_MAPTILER_KEY is not set. Map tiles may not load.');
     }
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: `https://api.maptiler.com/maps/streets-v4/style.json?key=${key}`,
+      style: `https://api.maptiler.com/maps/streets-v4/style.json?key=${key ?? ''}`,
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
     });
@@ -515,7 +522,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       ) => {
         const highlightSource = f.source && HIGHLIGHT_SOURCE_MAP[f.source];
         if (highlightSource && f.geometry) {
-          const geom = JSON.parse(JSON.stringify(f.geometry)) as Feature['geometry'];
+          const geom = structuredClone(f.geometry);
           bySource[highlightSource].push({
             type: 'Feature',
             geometry: geom,
@@ -525,15 +532,13 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       };
 
       const flushHighlightSources = (bySource: Record<string, Feature[]>) => {
-        (Object.entries(bySource) as [string, Feature[]][]).forEach(([sourceId, feats]) => {
-          const geoJsonSource = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
-          if (geoJsonSource?.setData) {
-            geoJsonSource.setData({
-              type: 'FeatureCollection',
-              features: feats,
-            });
-          }
-        });
+        for (const sourceId of Object.keys(bySource)) {
+          const feats = bySource[sourceId];
+          getGeoJsonSource(map, sourceId)?.setData({
+            type: 'FeatureCollection',
+            features: feats,
+          });
+        }
       };
 
       const rebuildHighlightLayers = (
@@ -558,12 +563,10 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
             opts.suburbInteraction === 'click' && lockedSuburbs && lockedSuburbs.length > 0
               ? lockedSuburbs
               : opts.suburbInteraction === 'hover'
-                ? hoverFeatures.filter(
-                    (f) => f.layer?.id && (SUBURB_LAYER_IDS as readonly string[]).includes(f.layer.id)
-                  )
+                ? hoverFeatures.filter((f) => f.layer?.id && SUBURB_LAYER_ID_SET.has(f.layer.id))
                 : [];
           suburbGeoms.forEach((f) => {
-            if (!f.layer?.id || !(SUBURB_LAYER_IDS as readonly string[]).includes(f.layer.id)) return;
+            if (!f.layer?.id || !SUBURB_LAYER_ID_SET.has(f.layer.id)) return;
             pushToHighlightSource(f, bySource);
           });
         }
@@ -571,11 +574,9 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
         const streetSource =
           opts.streetInteraction === 'click' && lockedStreets && lockedStreets.length > 0
             ? lockedStreets
-            : hoverFeatures.filter(
-                (f) => f.layer?.id && (STREET_LAYER_IDS as readonly string[]).includes(f.layer.id)
-              );
+            : hoverFeatures.filter((f) => f.layer?.id && STREET_LAYER_ID_SET.has(f.layer.id));
         streetSource.forEach((f) => {
-          if (!f.layer?.id || !(STREET_LAYER_IDS as readonly string[]).includes(f.layer.id)) return;
+          if (!f.layer?.id || !STREET_LAYER_ID_SET.has(f.layer.id)) return;
           pushToHighlightSource(f, bySource);
         });
 
@@ -589,10 +590,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
           SOURCE_IDS.metroStreetsHover,
           SOURCE_IDS.metroSuburbsHover,
         ].forEach((id) => {
-          const source = map.getSource(id) as maplibregl.GeoJSONSource | undefined;
-          if (source?.setData) {
-            source.setData(emptyFeatureCollection());
-          }
+          getGeoJsonSource(map, id)?.setData(emptyFeatureCollection());
         });
       };
 
@@ -633,7 +631,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
           allFeatures = [];
         }
         const streetFeatures: QueriedStreetFeature[] = allFeatures
-          .filter((f) => f.layer?.id && (STREET_LAYER_IDS as readonly string[]).includes(f.layer.id))
+          .filter((f) => f.layer?.id && STREET_LAYER_ID_SET.has(f.layer.id))
           .map((f) => ({
             properties: (f.properties || {}) as StreetFeatureProperties,
             id: f.id,
@@ -641,9 +639,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
           }));
 
         const opts = optionsRef.current;
-        const suburbUnderCursor = allFeatures.some(
-          (f) => f.layer?.id && (SUBURB_LAYER_IDS as readonly string[]).includes(f.layer.id)
-        );
+        const suburbUnderCursor = allFeatures.some((f) => f.layer?.id && SUBURB_LAYER_ID_SET.has(f.layer.id));
         const suburbClickable =
           opts.showSuburbs &&
           opts.suburbInteraction === 'click' &&
@@ -683,12 +679,12 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
         const opts = optionsRef.current;
         lastMousePoint = [e.point.x, e.point.y];
 
-        let streetFeats: (maplibregl.MapGeoJSONFeature & { properties: StreetFeatureProperties })[] = [];
+        let streetFeats: maplibregl.MapGeoJSONFeature[] = [];
         let suburbFeats: maplibregl.MapGeoJSONFeature[] = [];
         try {
           streetFeats = map.queryRenderedFeatures(e.point, {
             layers: [...STREET_LAYER_IDS],
-          }) as (maplibregl.MapGeoJSONFeature & { properties: StreetFeatureProperties })[];
+          });
         } catch {
           streetFeats = [];
         }
@@ -747,25 +743,24 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       } catch {
         return;
       }
-      const currentData = dataRef.current;
-      const currentOptions = optionsRef.current;
-      if (currentData) {
-        const shouldFit =
-          currentOptions.fitAllLocations && !hasPerformedInitialFitRef.current;
-        applyDataToMap(map, currentData, currentOptions, shouldFit);
+      if (data) {
+        const shouldFit = options.fitAllLocations && !hasPerformedInitialFitRef.current;
+        applyDataToMap(map, data, options, shouldFit);
         if (shouldFit) hasPerformedInitialFitRef.current = true;
       } else {
-        map.setLayoutProperty('country-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
-        map.setLayoutProperty('metro-suburbs-fill', 'visibility', currentOptions.showSuburbs ? 'visible' : 'none');
-        syncSuburbLayerOptions(map, currentOptions);
+        map.setLayoutProperty('country-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
+        map.setLayoutProperty('metro-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
+        syncSuburbLayerOptions(map, options);
       }
     };
 
     if (map.isStyleLoaded()) {
-      runUpdate();
+      void runUpdate();
     } else {
-      const onLoad = () => runUpdate();
-      map.once('load', onLoad);
+      const onLoad = () => {
+        void runUpdate();
+      };
+      void map.once('load', onLoad);
       return () => {
         map.off('load', onLoad);
       };
@@ -775,19 +770,20 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   useEffect(() => {
     const map = mapRef.current;
     if (!map || resetPositionTrigger <= 0) return;
-    const currentOptions = optionsRef.current;
     const runReset = () => {
-      if (currentOptions.fitAllLocations && data) {
-        fitMapToData(map, data, currentOptions);
+      if (options.fitAllLocations && data) {
+        fitMapToData(map, data, options);
       } else {
         map.flyTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
       }
     };
     if (!map.isStyleLoaded()) {
-      map.once('load', runReset);
-    } else {
-      runReset();
+      void map.once('load', runReset);
+      return () => {
+        map.off('load', runReset);
+      };
     }
+    void runReset();
   }, [resetPositionTrigger, data, options]);
 
   return (

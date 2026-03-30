@@ -1,4 +1,4 @@
-type ApiCameraLocation = {
+export type ApiCameraLocation = {
   cameraLocationId: number;
   resolvedLocationId: number;
   streetName: string;
@@ -18,4 +18,4 @@ type ApiCameraLocations = {
   dateRange: { startDate: string; endDate: string };
 };
 
-export type { ApiCameraLocation, ApiCameraLocations };
+export type { ApiCameraLocations };

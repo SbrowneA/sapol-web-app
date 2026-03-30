@@ -21,27 +21,37 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
-function getCalendarDays(year: number, month: number): (number | null)[] {
+type CalendarCell = { key: string; day: number | null };
+
+function getCalendarDays(year: number, month: number): CalendarCell[] {
   const first = new Date(year, month, 1);
   const last = new Date(year, month + 1, 0);
   const startDay = first.getDay();
   const daysInMonth = last.getDate();
-  const result: (number | null)[] = [];
-  for (let i = 0; i < startDay; i++) result.push(null);
-  for (let d = 1; d <= daysInMonth; d++) result.push(d);
+  const result: CalendarCell[] = [];
+  for (let i = 0; i < startDay; i++) {
+    result.push({ key: `pad-${year}-${month}-${i}`, day: null });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    result.push({ key: `day-${year}-${month}-${d}`, day: d });
+  }
   return result;
 }
 
 export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState<Date>(() => new Date(value || Date.now()));
+  const [syncedValue, setSyncedValue] = useState(value);
   const popupRef = useRef<HTMLDivElement>(null);
 
-  const currentDate = value ? new Date(value) : new Date();
+  if (value !== syncedValue) {
+    setSyncedValue(value);
+    if (value) {
+      setViewMonth(new Date(value));
+    }
+  }
 
-  useEffect(() => {
-    if (value) setViewMonth(new Date(value));
-  }, [value]);
+  const currentDate = value ? new Date(value) : new Date();
 
   useEffect(() => {
     if (!open) return;
@@ -161,20 +171,22 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
             ))}
           </div>
           <div className="date-picker-grid">
-            {calendarDays.map((day, i) =>
-              day === null ? (
-                <span key={`empty-${i}`} className="day-cell empty" />
-              ) : (
+            {calendarDays.map((cell) => {
+              if (cell.day === null) {
+                return <span key={cell.key} className="day-cell empty" />;
+              }
+              const day = cell.day;
+              return (
                 <button
-                  key={day}
+                  key={cell.key}
                   type="button"
                   className={`day-cell ${day === currentDate.getDate() && viewMonth.getMonth() === currentDate.getMonth() && viewMonth.getFullYear() === currentDate.getFullYear() ? 'selected' : ''}`}
                   onClick={() => handleSelectDay(day)}
                 >
                   {day}
                 </button>
-              )
-            )}
+              );
+            })}
           </div>
         </div>
       )}

@@ -1,73 +1,44 @@
-# React + TypeScript + Vite
+# SAPOL Web App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React Vite front end application to consume sapol-data-service.
 
-Currently, two official plugins are available:
+## Live Demo
+You can find the live demo [here](https://sapol-web-app.vercel.app/)
+_Note: due to free-tier hosting, the backend may take up to a minute to return results on the initial reuqest (cold-start)_
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Development
 
-## React Compiler
+Install dependencies and start the dev server:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Configure environment variables in `.env` or `.env.local` (see [Vite env files](https://vite.dev/guide/env-and-mode.html)). Variables must be prefixed with `VITE_` to be exposed to the client.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| Variable | Purpose |
+| -------- | ------- |
+| `VITE_API_BASE_URL` | Base URL for the data API (e.g. `https://your-service.example.com`). Requests use `${VITE_API_BASE_URL}/api/...`. |
+| `VITE_MAPTILER_KEY` | MapTiler API key for map tiles. |
+| `VITE_PORT` | Dev server port (default `5173`). |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+In development, `vite.config.ts` proxies `/api` to `http://localhost:3000`. If `VITE_API_BASE_URL` is unset, camera location requests use relative `/api/...` URLs and hit that proxy. If you set `VITE_API_BASE_URL`, requests go to that host instead (typical when pointing at a hosted API).
+
+## Production
+
+- **Build:** `npm run build` runs TypeScript (`tsc -b`) then Vite. Output is in `dist/`.
+- **Smoke test locally:** `npm run preview` serves `dist/` (not for production traffic).
+- **Environment:** Set `VITE_API_BASE_URL` and `VITE_MAPTILER_KEY` in the hosting provider’s build environment. Vite inlines these at **build time**; changing them requires a new build.
+- **Hosting:** Deploy `dist/` as static files (CDN, object storage + CDN, or any static host). Use SPA fallback so client routes resolve to `index.html` if you add routing later.
+- **CORS:** The deployed API must allow your production origin for browser `fetch` calls.
+- **Secrets:** Do not commit API keys. Keep `.env.local` and similar out of version control.
+
+## Quality checks
+
+```bash
+npm run lint
+npm run build
 ```
+
+GitHub Actions runs `npm run build` on push and pull requests (see `.github/workflows/ci.yml`). Configure repository secrets `VITE_MAPTILER_KEY` and optionally `VITE_API_BASE_URL` so CI builds succeed.

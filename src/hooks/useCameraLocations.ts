@@ -7,7 +7,7 @@ function formatDate(date: Date): string {
 }
 
 export function useCameraLocations(initialDate?: Date) {
-  const [date, setDate] = useState<Date>(initialDate ?? new Date());
+  const [date, setDate] = useState<Date>(() => initialDate ?? new Date());
   const [data, setData] = useState<ApiCameraLocations | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -27,7 +27,7 @@ export function useCameraLocations(initialDate?: Date) {
   }, [date]);
 
   useEffect(() => {
-    refetch();
+    void refetch();
   }, [refetch]);
 
   const setDateAndRefetch = useCallback((newDate: Date) => {

@@ -1,6 +1,6 @@
 import type { ApiCameraLocations } from '../types/api';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export async function fetchCameraLocations(params: {
   date?: string;
@@ -25,7 +25,8 @@ export async function fetchCameraLocations(params: {
     throw new Error(`Failed to fetch camera locations: ${res.status} ${res.statusText}`);
   }
 
-  return res.json();
+  const body: unknown = await res.json();
+  return body as ApiCameraLocations;
 }
 
 export function getCameraLocationsUrl(params: { date?: string; start_date?: string; end_date?: string }): string {
