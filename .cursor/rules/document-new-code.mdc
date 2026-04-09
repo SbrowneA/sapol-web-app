@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Concisely but clearly document fucntions (and new code where required) with jsdoc strings, aligning with the google style guide for consistency (https://google.github.io/styleguide/jsguide.html)
