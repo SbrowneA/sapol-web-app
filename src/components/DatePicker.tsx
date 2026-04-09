@@ -1,5 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 
+import {
+  addSapolCalendarDays,
+  dateFromSapolYmd,
+  getSapolYmdFromInstant,
+  parseSapolDateString,
+  type SapolYmd,
+} from '../lib/sapolDate';
+
+/**
+ * `value` is the SAPOL day as `YYYY-MM-DD` for **South Australia (Adelaide)**. Navigation and
+ * “Today” follow that same meaning, not the visitor’s laptop timezone.
+ */
 interface DatePickerProps {
   value: string;
   onChange: (date: Date) => void;
@@ -11,47 +23,79 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function formatDisplay(date: Date): string {
-  return date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
+/** Short label for one SA calendar day (for the main control, not dependent on browser TZ). */
+function formatDisplay(ymd: SapolYmd): string {
+  return new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day, 12)).toLocaleDateString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 type CalendarCell = { key: string; day: number | null };
 
-function getCalendarDays(year: number, month: number): CalendarCell[] {
-  const first = new Date(year, month, 1);
-  const last = new Date(year, month + 1, 0);
+/**
+ * Month grid for the popup (padding + days 1…N). Weekday columns follow the device locale for
+ * layout only; the **selected date** is still the SA `YYYY-MM-DD` from props.
+ */
+function getCalendarDays(year: number, monthZeroIndexed: number): CalendarCell[] {
+  const first = new Date(year, monthZeroIndexed, 1);
+  const last = new Date(year, monthZeroIndexed + 1, 0);
   const startDay = first.getDay();
   const daysInMonth = last.getDate();
   const result: CalendarCell[] = [];
   for (let i = 0; i < startDay; i++) {
-    result.push({ key: `pad-${year}-${month}-${i}`, day: null });
+    result.push({ key: `pad-${year}-${monthZeroIndexed}-${i}`, day: null });
   }
   for (let d = 1; d <= daysInMonth; d++) {
-    result.push({ key: `day-${year}-${month}-${d}`, day: d });
+    result.push({ key: `day-${year}-${monthZeroIndexed}-${d}`, day: d });
   }
   return result;
 }
 
+/** Year and month (1–12) for the open calendar’s page. */
+type ViewMonth = { year: number; month: number };
+
+function viewMonthFromYmd(ymd: SapolYmd): ViewMonth {
+  return { year: ymd.year, month: ymd.month };
+}
+
+/** Which month the popup opens on: from `value`, or SA “today” if `value` is invalid. */
+function initialViewMonth(value: string): ViewMonth {
+  try {
+    return viewMonthFromYmd(parseSapolDateString(value));
+  } catch {
+    return viewMonthFromYmd(getSapolYmdFromInstant(new Date()));
+  }
+}
+
+/**
+ * Picks which **South Australian (SAPOL) day** to show. “Today” = today in `Australia/Adelaide`;
+ * prev/next move the SAPOL `YYYY-MM-DD` by one SA calendar day, regardless of where the user sits.
+ */
 export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
   const [open, setOpen] = useState(false);
-  const [viewMonth, setViewMonth] = useState<Date>(() => new Date(value || Date.now()));
+  const [viewMonth, setViewMonth] = useState<ViewMonth>(() => initialViewMonth(value));
   const [syncedValue, setSyncedValue] = useState(value);
   const popupRef = useRef<HTMLDivElement>(null);
 
   if (value !== syncedValue) {
     setSyncedValue(value);
     if (value) {
-      setViewMonth(new Date(value));
+      try {
+        setViewMonth(viewMonthFromYmd(parseSapolDateString(value)));
+      } catch {
+        setViewMonth(viewMonthFromYmd(getSapolYmdFromInstant(new Date())));
+      }
     }
   }
 
-  const currentDate = value ? new Date(value) : new Date();
+  let currentYmd: SapolYmd;
+  try {
+    currentYmd = parseSapolDateString(value);
+  } catch {
+    currentYmd = getSapolYmdFromInstant(new Date());
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -66,39 +110,41 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
 
   const handlePrevDay = () => {
     if (disabled) return;
-    onChange(addDays(currentDate, -1));
+    onChange(dateFromSapolYmd(addSapolCalendarDays(currentYmd, -1)));
   };
 
   const handleNextDay = () => {
     if (disabled) return;
-    onChange(addDays(currentDate, 1));
+    onChange(dateFromSapolYmd(addSapolCalendarDays(currentYmd, 1)));
   };
 
   const handleToday = () => {
     if (disabled) return;
-    onChange(new Date());
+    onChange(dateFromSapolYmd(getSapolYmdFromInstant(new Date())));
     setOpen(false);
   };
 
   const handlePrevMonth = () => {
-    const d = new Date(viewMonth);
-    d.setMonth(d.getMonth() - 1);
-    setViewMonth(d);
+    setViewMonth((vm) => {
+      if (vm.month === 1) return { year: vm.year - 1, month: 12 };
+      return { year: vm.year, month: vm.month - 1 };
+    });
   };
 
   const handleNextMonth = () => {
-    const d = new Date(viewMonth);
-    d.setMonth(d.getMonth() + 1);
-    setViewMonth(d);
+    setViewMonth((vm) => {
+      if (vm.month === 12) return { year: vm.year + 1, month: 1 };
+      return { year: vm.year, month: vm.month + 1 };
+    });
   };
 
   const handleSelectDay = (day: number) => {
-    const d = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
-    onChange(d);
+    onChange(dateFromSapolYmd({ year: viewMonth.year, month: viewMonth.month, day }));
     setOpen(false);
   };
 
-  const calendarDays = getCalendarDays(viewMonth.getFullYear(), viewMonth.getMonth());
+  const monthZero = viewMonth.month - 1;
+  const calendarDays = getCalendarDays(viewMonth.year, monthZero);
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
@@ -122,7 +168,7 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
           aria-expanded={open}
           aria-haspopup="dialog"
         >
-          {formatDisplay(currentDate)}
+          {formatDisplay(currentYmd)}
         </button>
         <button
           type="button"
@@ -157,7 +203,7 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
               <ChevronLeft />
             </button>
             <h3 className="date-picker-month">
-              {MONTH_NAMES[viewMonth.getMonth()]} {viewMonth.getFullYear()}
+              {MONTH_NAMES[monthZero]} {viewMonth.year}
             </h3>
             <button type="button" className="month-nav-btn" onClick={handleNextMonth} aria-label="Next month">
               <ChevronRight />
@@ -180,7 +226,7 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
                 <button
                   key={cell.key}
                   type="button"
-                  className={`day-cell ${day === currentDate.getDate() && viewMonth.getMonth() === currentDate.getMonth() && viewMonth.getFullYear() === currentDate.getFullYear() ? 'selected' : ''}`}
+                  className={`day-cell ${day === currentYmd.day && viewMonth.month === currentYmd.month && viewMonth.year === currentYmd.year ? 'selected' : ''}`}
                   onClick={() => handleSelectDay(day)}
                 >
                   {day}
