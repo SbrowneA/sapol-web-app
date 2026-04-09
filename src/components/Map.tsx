@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, FeatureCollection } from 'geojson';
 
 import type { ApiCameraLocation, ApiCameraLocations } from '../types/api';
+import { FloatingNotification } from './FloatingNotification';
 import type { MapOptions } from './MapControls';
 
 const SOURCE_IDS = {
@@ -241,6 +242,27 @@ const DEFAULT_OPTIONS: MapOptions = {
 const DEFAULT_CENTER: [number, number] = [138.6, -34.9];
 const DEFAULT_ZOOM = 10;
 
+/** Auto-dismiss empty-region notices; use `0` for sticky until user dismisses. */
+const EMPTY_REGION_NOTICE_DURATION_SEC = 6;
+
+const emptyRegionNoticeLeading = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+    <path
+      d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-11v6h2v-6h-2zm0-4v2h2V7h-2z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+function getEmptyRegionNoticeMessage(metroLen = 0, countryLen = 0): string | null {
+  const metroEmpty = metroLen === 0;
+  const countryEmpty = countryLen === 0;
+  if (!metroEmpty && !countryEmpty) return null;
+  if (metroEmpty && countryEmpty) return 'No locations available for this date.';
+  if (metroEmpty) return 'No metro locations available for this date.';
+  return 'No country locations available for this date.';
+}
+
 function fitMapToData(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions) {
   const countryStreets = locationsToStreetFeatures(data.locations?.country ?? [], 'country');
   const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? [], options.uniqueSuburbs);
@@ -276,6 +298,22 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   const dataRef = useRef<ApiCameraLocations | null>(null);
   const optionsRef = useRef<MapOptions>(options);
   const hasPerformedInitialFitRef = useRef(false);
+  const [emptyRegionNoticeDismissed, setEmptyRegionNoticeDismissed] = useState(false);
+
+  useEffect(() => {
+    if (loading) setEmptyRegionNoticeDismissed(false);
+  }, [loading]);
+
+  const emptyRegionMessage =
+    !loading && data?.locations
+      ? getEmptyRegionNoticeMessage(data.locations.metro?.length, data.locations.country?.length)
+      : null;
+
+  const handleDismissEmptyRegionNotice = useCallback(() => {
+    setEmptyRegionNoticeDismissed(true);
+  }, []);
+
+  const showEmptyRegionNotice = Boolean(emptyRegionMessage) && !emptyRegionNoticeDismissed;
 
   useEffect(() => {
     dataRef.current = data;
@@ -794,6 +832,14 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
           Loading locations…
         </div>
       )}
+      <FloatingNotification
+        open={showEmptyRegionNotice}
+        durationSeconds={EMPTY_REGION_NOTICE_DURATION_SEC}
+        leading={emptyRegionNoticeLeading}
+        onDismiss={handleDismissEmptyRegionNotice}
+      >
+        {emptyRegionMessage}
+      </FloatingNotification>
       <div ref={mapContainerRef} className="map-container" />
     </div>
   );
