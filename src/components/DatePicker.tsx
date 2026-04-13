@@ -99,13 +99,17 @@ export function DatePicker({ value, onChange, disabled }: DatePickerProps) {
 
   useEffect(() => {
     if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleDismissOutside = (e: MouseEvent | PointerEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleDismissOutside);
+    document.addEventListener('pointerdown', handleDismissOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleDismissOutside);
+      document.removeEventListener('pointerdown', handleDismissOutside);
+    };
   }, [open]);
 
   const handlePrevDay = () => {

@@ -15,25 +15,47 @@ const DEFAULT_MAP_OPTIONS: MapOptions = {
   suburbOutlineSuburbs: true,
 };
 
+/**
+ * Returns map options for first paint. Touch-first and narrow viewports default
+ * suburb interaction to click because hover-based highlights are unavailable.
+ */
+function getInitialMapOptions(): MapOptions {
+  if (typeof window === 'undefined') {
+    return DEFAULT_MAP_OPTIONS;
+  }
+  const prefersNoHover = window.matchMedia('(hover: none)').matches;
+  const narrow = window.matchMedia('(max-width: 640px)').matches;
+  if (prefersNoHover || narrow) {
+    return {
+      ...DEFAULT_MAP_OPTIONS,
+      streetInteraction: 'click',
+      suburbInteraction: 'click',
+    };
+  }
+  return DEFAULT_MAP_OPTIONS;
+}
+
 function App() {
   const { setDate, dateStr, data, loading, error } = useCameraLocations();
   const [showMapOptions, setShowMapOptions] = useState(false);
-  const [mapOptions, setMapOptions] = useState<MapOptions>(DEFAULT_MAP_OPTIONS);
+  const [mapOptions, setMapOptions] = useState<MapOptions>(() => getInitialMapOptions());
   const [resetPositionTrigger, setResetPositionTrigger] = useState(0);
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>Mobile Speed Camera Locations</h1>
-        <DatePicker value={dateStr} onChange={setDate} disabled={loading} />
-        <button
-          type="button"
-          className="map-options-toggle"
-          onClick={() => setShowMapOptions((v) => !v)}
-          title="Map display options"
-        >
-          Options
-        </button>
+        <div className="app-header-toolbar">
+          <DatePicker value={dateStr} onChange={setDate} disabled={loading} />
+          <button
+            type="button"
+            className="map-options-toggle"
+            onClick={() => setShowMapOptions((v) => !v)}
+            title="Map display options"
+          >
+            Options
+          </button>
+        </div>
         {showMapOptions && (
           <MapControls
             options={mapOptions}
