@@ -151,21 +151,19 @@ export function MapControls({ options, onChange, dateStr, onClose, onResetPositi
       >
         Reset position
       </button>
-      {/* TODO: fix popup blocker issue */}
-      {/* 
-      <div className="map-controls-debug">
+      {/* TODO: fix popup blocked issue and add  */}
+      <div className="map-controls-debug" style={{ display: 'none' }}>
         <button
           type="button"
           className="map-controls-debug-open"
           onClick={() => {
             const opened = openResolvedLocationsQueryDebugWindow({ date: dateStr });
             if (!opened) window.alert('Could not open a new tab — check your popup blocker.');
-          }}
-        >
+          }}>
           Open query results in new tab
         </button>
         <span className="map-controls-debug-hint">Runs the Supabase `.rpc(...)` client call and prints params + JSON.</span>
-      </div> */}
+      </div>
     </div>
   );
 }
