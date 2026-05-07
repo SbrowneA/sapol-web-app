@@ -1,6 +1,7 @@
 # Required repository secrets: GitHub → Settings → Secrets and variables → Actions
-#   VITE_MAPTILER_KEY   — MapTiler key (inlined at build; restrict referrer/URL in MapTiler Cloud)
-#   VITE_API_BASE_URL   — optional; set if CI builds should target your production API base URL
+#   VITE_MAPTILER_KEY              — MapTiler key (inlined at build; restrict referrer/URL in MapTiler Cloud)
+#   VITE_SUPABASE_URL               — Supabase project URL
+#   VITE_SUPABASE_PUBLISHABLE_KEY   — Supabase publishable key (public)
 
 name: CI
 
@@ -16,7 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_MAPTILER_KEY: ${{ secrets.VITE_MAPTILER_KEY }}
-      VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

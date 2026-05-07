@@ -301,7 +301,8 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   const [emptyRegionNoticeDismissed, setEmptyRegionNoticeDismissed] = useState(false);
 
   useEffect(() => {
-    if (loading) setEmptyRegionNoticeDismissed(false);
+    if (!loading) return;
+    queueMicrotask(() => setEmptyRegionNoticeDismissed(false));
   }, [loading]);
 
   const emptyRegionMessage =
