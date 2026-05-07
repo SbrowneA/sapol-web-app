@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { getCameraLocationsUrl } from '../api/cameraLocations';
+import { openResolvedLocationsQueryDebugWindow } from './debug/openResolvedLocationsQueryDebugWindow';
 
 export type StreetInteractionMode = 'hover' | 'click';
 export type SuburbInteractionMode = 'hover' | 'click';
@@ -17,6 +17,7 @@ export interface MapOptions {
 interface MapControlsProps {
   options: MapOptions;
   onChange: (options: MapOptions) => void;
+  /** Selected SAPOL day `YYYY-MM-DD`; used for “Open query results …” RPC debug panel. */
   dateStr: string;
   onClose: () => void;
   onResetPosition: () => void;
@@ -38,8 +39,6 @@ export function MapControls({ options, onChange, dateStr, onClose, onResetPositi
       document.removeEventListener('pointerdown', handleDismissOutside);
     };
   }, [onClose]);
-
-  const apiUrl = getCameraLocationsUrl({ date: dateStr });
 
   return (
     <div ref={popupRef} className="map-controls-popup" role="dialog" aria-label="Map display options">
@@ -152,10 +151,18 @@ export function MapControls({ options, onChange, dateStr, onClose, onResetPositi
       >
         Reset position
       </button>
-      <div className="map-controls-api">
-        <a href={apiUrl} target="_blank" rel="noopener noreferrer">
-          Open API response in new tab
-        </a>
+      {/* TODO: fix popup blocked issue and add  */}
+      <div className="map-controls-debug" style={{ display: 'none' }}>
+        <button
+          type="button"
+          className="map-controls-debug-open"
+          onClick={() => {
+            const opened = openResolvedLocationsQueryDebugWindow({ date: dateStr });
+            if (!opened) window.alert('Could not open a new tab — check your popup blocker.');
+          }}>
+          Open query results in new tab
+        </button>
+        <span className="map-controls-debug-hint">Runs the Supabase `.rpc(...)` client call and prints params + JSON.</span>
       </div>
     </div>
   );
