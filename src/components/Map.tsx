@@ -172,14 +172,27 @@ function syncSuburbLayerOptions(map: maplibregl.Map, options: MapOptions) {
   }
 }
 
-function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions, fitBounds: boolean) {
+/**
+ * True once the map's own GeoJSON sources exist (added in the map `load` handler).
+ * `isStyleLoaded()` can be true earlier, which previously caused a silent no-op apply.
+ */
+function areLocationSourcesReady(map: maplibregl.Map): boolean {
+  return getGeoJsonSource(map, SOURCE_IDS.countryStreets) !== undefined;
+}
+
+/**
+ * Pushes location features into the map sources and optionally fits bounds.
+ *
+ * @returns Whether sources were present and data was applied.
+ */
+function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions, fitBounds: boolean): boolean {
   const countryStreets = locationsToStreetFeatures(data.locations?.country ?? [], 'country');
   const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? [], options.uniqueSuburbs);
   const metroStreets = locationsToStreetFeatures(data.locations?.metro ?? [], 'metro');
   const metroSuburbs = locationsToSuburbFeatures(data.locations?.metro ?? [], options.uniqueSuburbs);
 
   const countryStreetsSource = getGeoJsonSource(map, SOURCE_IDS.countryStreets);
-  if (!countryStreetsSource) return;
+  if (!countryStreetsSource) return false;
 
   countryStreetsSource.setData({
     type: 'FeatureCollection',
@@ -227,6 +240,7 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: 
       map.fitBounds(bounds, { padding: 40, maxZoom: 14 });
     }
   }
+  return true;
 }
 
 const DEFAULT_OPTIONS: MapOptions = {
@@ -545,8 +559,8 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
 
       if (dataRef.current) {
         const shouldFit = optionsRef.current.fitAllLocations;
-        applyDataToMap(map, dataRef.current, optionsRef.current, shouldFit);
-        if (shouldFit) hasPerformedInitialFitRef.current = true;
+        const applied = applyDataToMap(map, dataRef.current, optionsRef.current, shouldFit);
+        if (applied && shouldFit) hasPerformedInitialFitRef.current = true;
       }
 
       const popup = new maplibregl.Popup({ closeOnClick: true });
@@ -776,34 +790,42 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
     const map = mapRef.current;
     if (!map) return;
 
-    const runUpdate = () => {
-      try {
-        map.getSource(SOURCE_IDS.countryStreets);
-      } catch {
-        return;
-      }
+    /** Applies when GeoJSON sources exist; skips if the style is ready but `load` has not added them yet. */
+    const tryUpdate = (): boolean => {
+      if (!areLocationSourcesReady(map)) return false;
+
       if (data) {
         const shouldFit = options.fitAllLocations && !hasPerformedInitialFitRef.current;
-        applyDataToMap(map, data, options, shouldFit);
-        if (shouldFit) hasPerformedInitialFitRef.current = true;
-      } else {
+        const applied = applyDataToMap(map, data, options, shouldFit);
+        if (applied && shouldFit) hasPerformedInitialFitRef.current = true;
+        return applied;
+      }
+
+      try {
         map.setLayoutProperty('country-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
         map.setLayoutProperty('metro-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
         syncSuburbLayerOptions(map, options);
+      } catch {
+        return false;
       }
+      return true;
     };
 
-    if (map.isStyleLoaded()) {
-      void runUpdate();
-    } else {
-      const onLoad = () => {
-        void runUpdate();
-      };
-      void map.once('load', onLoad);
-      return () => {
-        map.off('load', onLoad);
-      };
-    }
+    if (tryUpdate()) return;
+
+    /** `load` may have already fired; `idle` still runs after the first placement pass once sources exist. */
+    const onMapReadyPulse = () => {
+      if (!tryUpdate()) return;
+      map.off('load', onMapReadyPulse);
+      map.off('idle', onMapReadyPulse);
+    };
+    map.on('load', onMapReadyPulse);
+    map.on('idle', onMapReadyPulse);
+
+    return () => {
+      map.off('load', onMapReadyPulse);
+      map.off('idle', onMapReadyPulse);
+    };
   }, [data, options]);
 
   useEffect(() => {
