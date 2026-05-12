@@ -3,7 +3,7 @@
 #   VITE_SUPABASE_URL               — Supabase project URL
 #   VITE_SUPABASE_PUBLISHABLE_KEY   — Supabase publishable key (public)
 
-name: CI
+name: CI checks
 
 on:
   push:
@@ -27,3 +27,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run lint
