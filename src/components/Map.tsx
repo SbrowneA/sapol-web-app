@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Feature, FeatureCollection } from 'geojson';
+import type { Feature, FeatureCollection, Geometry } from 'geojson';
 
 import type { ApiCameraLocation, ApiCameraLocations } from '../types/api';
 import { FloatingNotification } from './FloatingNotification';
 import type { MapOptions } from './MapControls';
+import type { QueriedStreetFeature, StreetFeatureProperties, SuburbFeatureProperties } from './Map.types';
 
 const SOURCE_IDS = {
   countryStreets: 'country-streets',
@@ -45,15 +46,6 @@ function formatDateRange(startDate: string, endDate: string): string {
   return `${formatDateShort(startDate)} – ${formatDateShort(endDate)}`;
 }
 
-type StreetFeatureProperties = {
-  cameraLocationId: number;
-  streetName: string;
-  suburbName: string;
-  startDate: string;
-  endDate: string;
-  regionType: 'country' | 'metro';
-};
-
 function locationsToStreetFeatures(locations: ApiCameraLocation[], regionType: 'country' | 'metro'): Feature[] {
   return locations
     .filter((loc) => loc.streetGeom && (loc.streetGeom.type === 'LineString' || loc.streetGeom.type === 'MultiLineString'))
@@ -76,12 +68,18 @@ function locationsToSuburbFeatures(locations: ApiCameraLocation[], uniqueSuburbs
   const filtered = locations.filter(
     (loc) => loc.suburbGeom && (loc.suburbGeom.type === 'Polygon' || loc.suburbGeom.type === 'MultiPolygon')
   );
+  const baseProps = (loc: ApiCameraLocation): SuburbFeatureProperties => ({
+    cameraLocationId: loc.cameraLocationId,
+    streetName: loc.streetName,
+    suburbName: loc.suburbName,
+    suburbId: loc.suburbId,
+  });
   if (!uniqueSuburbs) {
     return filtered.map((loc) => ({
       type: 'Feature' as const,
       id: loc.cameraLocationId,
       geometry: loc.suburbGeom,
-      properties: { cameraLocationId: loc.cameraLocationId, streetName: loc.streetName, suburbName: loc.suburbName },
+      properties: baseProps(loc),
     }));
   }
   const seen = new Set<number>();
@@ -95,7 +93,7 @@ function locationsToSuburbFeatures(locations: ApiCameraLocation[], uniqueSuburbs
       type: 'Feature' as const,
       id: loc.cameraLocationId,
       geometry: loc.suburbGeom,
-      properties: { cameraLocationId: loc.cameraLocationId, streetName: loc.streetName, suburbName: loc.suburbName },
+      properties: baseProps(loc),
     }));
 }
 
@@ -106,6 +104,49 @@ function emptyFeatureCollection(): FeatureCollection {
 function getGeoJsonSource(map: maplibregl.Map, id: string): maplibregl.GeoJSONSource | undefined {
   const source = map.getSource(id);
   return source?.type === 'geojson' ? (source as maplibregl.GeoJSONSource) : undefined;
+}
+
+/**
+ * Builds a lookup of full suburb geometries from the same features we ship to GeoJSON sources.
+ * `queryRenderedFeatures` and per-tile `querySourceFeatures` hits can still be tile-clipped; this map is not.
+ *
+ * @param countrySuburbs Country region suburb features (already filtered for polygon types).
+ * @param metroSuburbs Metro region suburb features.
+ * @param out Cleared then filled with keys `${sourceId}:${suburbId}`.
+ */
+function rebuildSuburbHighlightGeometryLookup(
+  countrySuburbs: Feature[],
+  metroSuburbs: Feature[],
+  out: globalThis.Map<string, Geometry>
+): void {
+  out.clear();
+  const ingest = (sourceId: string, features: Feature[]) => {
+    for (const f of features) {
+      const p = f.properties as SuburbFeatureProperties | undefined;
+      if (!f.geometry || typeof p?.suburbId !== 'number') continue;
+      out.set(`${sourceId}:${p.suburbId}`, structuredClone(f.geometry as Geometry));
+    }
+  };
+  ingest(SOURCE_IDS.countrySuburbs, countrySuburbs);
+  ingest(SOURCE_IDS.metroSuburbs, metroSuburbs);
+}
+
+/**
+ * @param lookup Populated by `rebuildSuburbHighlightGeometryLookup` whenever suburb data is applied.
+ */
+function getSuburbGeometryForHighlight(
+  lookup: globalThis.Map<string, Geometry>,
+  sourceId: string | undefined,
+  suburbId: number
+): Geometry | null {
+  if (
+    !sourceId ||
+    (sourceId !== SOURCE_IDS.countrySuburbs && sourceId !== SOURCE_IDS.metroSuburbs)
+  ) {
+    return null;
+  }
+  const g = lookup.get(`${sourceId}:${suburbId}`);
+  return g ? structuredClone(g) : null;
 }
 
 function buildPopupHTML(features: QueriedStreetFeature[]): string {
@@ -131,12 +172,6 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-interface QueriedStreetFeature {
-  properties: StreetFeatureProperties;
-  id?: number | string;
-  source?: string;
-}
-
 interface MapProps {
   data: ApiCameraLocations | null;
   loading?: boolean;
@@ -146,20 +181,19 @@ interface MapProps {
 
 function syncSuburbLayerOptions(map: maplibregl.Map, options: MapOptions) {
   const show = options.showSuburbs;
-  const baseOn = show && options.suburbOutlineSuburbs;
-  const dashedOn = show && options.suburbOutlineSuburbs;
+  const outlineOn = show && options.suburbOutlineSuburbs;
   const fillOp = show && options.suburbHighlightOnInteraction ? 0.2 : 0;
 
   for (const id of ['country-suburbs-base-outline', 'metro-suburbs-base-outline'] as const) {
     try {
-      map.setLayoutProperty(id, 'visibility', baseOn ? 'visible' : 'none');
+      map.setLayoutProperty(id, 'visibility', outlineOn ? 'visible' : 'none');
     } catch {
       /* layer not ready */
     }
   }
   for (const id of ['country-suburbs-hover-outline', 'metro-suburbs-hover-outline'] as const) {
     try {
-      map.setLayoutProperty(id, 'visibility', dashedOn ? 'visible' : 'none');
+      map.setLayoutProperty(id, 'visibility', outlineOn ? 'visible' : 'none');
     } catch {
       /* layer not ready */
     }
@@ -183,9 +217,16 @@ function areLocationSourcesReady(map: maplibregl.Map): boolean {
 /**
  * Pushes location features into the map sources and optionally fits bounds.
  *
+ * @param suburbHighlightGeometryLookup In/out map of full suburb geometries for interaction highlights.
  * @returns Whether sources were present and data was applied.
  */
-function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: MapOptions, fitBounds: boolean): boolean {
+function applyDataToMap(
+  map: maplibregl.Map,
+  data: ApiCameraLocations,
+  options: MapOptions,
+  fitBounds: boolean,
+  suburbHighlightGeometryLookup: globalThis.Map<string, Geometry>
+): boolean {
   const countryStreets = locationsToStreetFeatures(data.locations?.country ?? [], 'country');
   const countrySuburbs = locationsToSuburbFeatures(data.locations?.country ?? [], options.uniqueSuburbs);
   const metroStreets = locationsToStreetFeatures(data.locations?.metro ?? [], 'metro');
@@ -214,6 +255,12 @@ function applyDataToMap(map: maplibregl.Map, data: ApiCameraLocations, options: 
   map.setLayoutProperty('country-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
   map.setLayoutProperty('metro-suburbs-fill', 'visibility', options.showSuburbs ? 'visible' : 'none');
   syncSuburbLayerOptions(map, options);
+
+  rebuildSuburbHighlightGeometryLookup(
+    options.showSuburbs ? countrySuburbs : [],
+    options.showSuburbs ? metroSuburbs : [],
+    suburbHighlightGeometryLookup
+  );
 
   if (fitBounds) {
     const allFeatures = [
@@ -311,6 +358,8 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
   const mapRef = useRef<maplibregl.Map | null>(null);
   const dataRef = useRef<ApiCameraLocations | null>(null);
   const optionsRef = useRef<MapOptions>(options);
+  /** Full suburb geometries keyed `${sourceId}:${suburbId}` for highlights (avoids tile-clipped queries). */
+  const suburbHighlightGeometryLookupRef = useRef(new globalThis.Map<string, Geometry>());
   const hasPerformedInitialFitRef = useRef(false);
   const [emptyRegionNoticeDismissed, setEmptyRegionNoticeDismissed] = useState(false);
 
@@ -365,6 +414,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       map.addSource(SOURCE_IDS.countrySuburbs, {
         type: 'geojson',
         data: emptyFeatureCollection(),
+        buffer: 512,
       });
       map.addSource(SOURCE_IDS.metroStreets, {
         type: 'geojson',
@@ -374,6 +424,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       map.addSource(SOURCE_IDS.metroSuburbs, {
         type: 'geojson',
         data: emptyFeatureCollection(),
+        buffer: 512,
       });
 
       map.addSource(SOURCE_IDS.countryStreetsHover, {
@@ -383,6 +434,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       map.addSource(SOURCE_IDS.countrySuburbsHover, {
         type: 'geojson',
         data: emptyFeatureCollection(),
+        buffer: 512,
       });
       map.addSource(SOURCE_IDS.metroStreetsHover, {
         type: 'geojson',
@@ -391,6 +443,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
       map.addSource(SOURCE_IDS.metroSuburbsHover, {
         type: 'geojson',
         data: emptyFeatureCollection(),
+        buffer: 512,
       });
 
       map.addLayer({
@@ -489,7 +542,6 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
             16,
             3,
           ],
-          'line-dasharray': [3, 2],
         },
       });
       map.addLayer({
@@ -535,7 +587,6 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
             16,
             3,
           ],
-          'line-dasharray': [3, 2],
         },
       });
       map.addLayer({
@@ -559,7 +610,13 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
 
       if (dataRef.current) {
         const shouldFit = optionsRef.current.fitAllLocations;
-        const applied = applyDataToMap(map, dataRef.current, optionsRef.current, shouldFit);
+        const applied = applyDataToMap(
+          map,
+          dataRef.current,
+          optionsRef.current,
+          shouldFit,
+          suburbHighlightGeometryLookupRef.current
+        );
         if (applied && shouldFit) hasPerformedInitialFitRef.current = true;
       }
 
@@ -582,6 +639,31 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
             properties: {},
           });
         }
+      };
+
+      /**
+       * Copies suburb geometry into hover layers using the authoritative lookup rebuilt in `applyDataToMap`,
+       * so outlines are not limited to tile-clipped hit-test geometry from `queryRenderedFeatures`.
+       */
+      const pushSuburbToHighlightSource = (
+        f: maplibregl.MapGeoJSONFeature,
+        bySource: Record<string, Feature[]>
+      ) => {
+        const highlightSource = f.source && HIGHLIGHT_SOURCE_MAP[f.source];
+        if (!highlightSource) return;
+        const props = (f.properties || {}) as Partial<SuburbFeatureProperties>;
+        const suburbId = props.suburbId;
+        const fromLookup =
+          f.source && typeof suburbId === 'number'
+            ? getSuburbGeometryForHighlight(suburbHighlightGeometryLookupRef.current, f.source, suburbId)
+            : null;
+        const geom = fromLookup ?? (f.geometry ? structuredClone(f.geometry) : null);
+        if (!geom) return;
+        bySource[highlightSource].push({
+          type: 'Feature',
+          geometry: geom,
+          properties: {},
+        });
       };
 
       const flushHighlightSources = (bySource: Record<string, Feature[]>) => {
@@ -620,7 +702,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
                 : [];
           suburbGeoms.forEach((f) => {
             if (!f.layer?.id || !SUBURB_LAYER_ID_SET.has(f.layer.id)) return;
-            pushToHighlightSource(f, bySource);
+            pushSuburbToHighlightSource(f, bySource);
           });
         }
 
@@ -796,7 +878,7 @@ export function Map({ data, loading, options = DEFAULT_OPTIONS, resetPositionTri
 
       if (data) {
         const shouldFit = options.fitAllLocations && !hasPerformedInitialFitRef.current;
-        const applied = applyDataToMap(map, data, options, shouldFit);
+        const applied = applyDataToMap(map, data, options, shouldFit, suburbHighlightGeometryLookupRef.current);
         if (applied && shouldFit) hasPerformedInitialFitRef.current = true;
         return applied;
       }
